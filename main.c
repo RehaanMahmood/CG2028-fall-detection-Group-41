@@ -148,19 +148,15 @@ int main(void)
 
         // this logic checks for decreases in acceleration (to detect if the board has been released)
 
-        if (sample_number >= 1 && accel_mps2_magnitude <= 9.8f && current_state != 2)
+        if ((sample_number >= 1) &&
+            (accel_mps2_magnitude <= 9.8f) &&
+            (current_state != 2) &&
+            (accel_mps2_magnitude <= 0.5f * prev_accel_mps2_magnitude))
         {
-            if ((prev_accel_mps2_magnitude - accel_mps2_magnitude) >= (0.5f * prev_accel_mps2_magnitude))
-            {
-                /*angular_displacement[0] += gyro_dps[0] * 0.045f;
-                angular_displacement[1] += gyro_dps[1] * 0.045f;
-                angular_displacement[2] += gyro_dps[2] * 0.045f;*/
-                current_state = 1;
-            }
-            else
-            {
-                current_state = 0;
-            }
+            /*angular_displacement[0] += gyro_dps[0] * 0.045f;
+            angular_displacement[1] += gyro_dps[1] * 0.045f;
+            angular_displacement[2] += gyro_dps[2] * 0.045f;*/
+            current_state = 1;
         }
         else
         {
