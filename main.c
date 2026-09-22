@@ -20,8 +20,9 @@
 /*--------------------------- Configuration ----------------------------------*/
 #define EWMA_ALPHA_ACCEL_PERCENT 80
 #define EWMA_ALPHA_GYRO_PERCENT 15
-#define NORMAL_LED_DELAY_MS 1
 #define FALL_LED_DELAY_MS 150
+#define FREEFALL_STREAK_MIN 3
+#define NORMAL_LED_DELAY_MS 1
 
 static void UART1_Init(void);
 static void UART_Send(const char *text);
@@ -66,10 +67,11 @@ int main(void)
     int fall_detected = 0;
     int recovery_period = 20;
     int fall_period = 5;
-    float prev_gyro_dps_magnitude;
-    float prev_accel_mps2_magnitude;
+    float prev_gyro_dps_magnitude = 0;
+    float prev_accel_mps2_magnitude = 0;
     int prev_state = 0;
     int current_state = 0; // 0: "normal" state, 1: "released" state, 2: "free-fall" state
+    static int freefall_streak = 0;
 
     float angular_displacement[3] = {0.0f, 0.0f, 0.0f};
 
@@ -146,26 +148,57 @@ int main(void)
                  gyro_dps[0], gyro_dps[1], gyro_dps[2], accel_mps2_magnitude, current_distance_travelled, gyro_dps_magnitude);
         UART_Send(buffer);
 
+        /* Optional debugging check. This confirms that the assembly routine
+         * matches the reference C routine for the current samples. */
+        // if ((accel_ewma_asm[0] != accel_ewma_c[0]) ||
+        //     (accel_ewma_asm[1] != accel_ewma_c[1]) ||
+        //     (accel_ewma_asm[2] != accel_ewma_c[2]) ||
+        //     (gyro_ewma_asm[0] != gyro_ewma_c[0]) ||
+        //     (gyro_ewma_asm[1] != gyro_ewma_c[1]) ||
+        //     (gyro_ewma_asm[2] != gyro_ewma_c[2]))
+        // {
+        //     UART_Send("WARNING: Assembly and C EWMA outputs do not match.\r\n");
+        // }
+
+        /**************** Elderly wearable state logic starts here************************
+         * Compulsory requirements:
+         * 1. Use filtered accelerometer AND gyroscope readings.
+         * 2. Distinguish normal activity, near-fall movements, and a real fall.
+         * 3. Use a slow LED blink for normal operation and a fast blink after
+         *    a fall is detected.
+         *********************************************************************/
+
         // this logic checks for decreases in acceleration (to detect if the board has been released)
 
         if ((sample_number >= 1) &&
-            (accel_mps2_magnitude <= 9.8f) &&
-            (current_state != 2) &&
-            (accel_mps2_magnitude <= 0.5f * prev_accel_mps2_magnitude))
+            (accel_mps2_magnitude <= 9.8f) &&                          // |accel| <= g
+            (current_state != 2) &&                                    // not free-falling
+            (accel_mps2_magnitude <= 0.5 * prev_accel_mps2_magnitude)) // accel is less than half of prev_accel
         {
             /*angular_displacement[0] += gyro_dps[0] * 0.045f;
             angular_displacement[1] += gyro_dps[1] * 0.045f;
             angular_displacement[2] += gyro_dps[2] * 0.045f;*/
-            current_state = 1;
+            current_state = 1; // it is released
         }
         else
         {
-            current_state = 0;
+            current_state = 0; // it is normal
         }
 
         // if previously board was in the "released state", check if the vertical acceleration is high enough, and change it to the "free-fall" state
         // note that the acceleration measured by the board is the normal force acting against gravity so lower reading means higher downward acceleration
-        if (current_state == 0 && prev_state == 1 && prev_accel_mps2_magnitude <= 2.5f)
+
+        // Counts the number of consecutive samples where the object is falling after being released. A minimum threshold prevents a drop of a few cm to cause fall detection.
+        if (accel_mps2_magnitude <= 2.5f)
+        {
+            freefall_streak++;
+        }
+        else
+        {
+            freefall_streak = 0;
+        }
+
+        if (current_state == 0 && prev_state == 1 && freefall_streak >= FREEFALL_STREAK_MIN)
         {
             current_state = 2;
         }
@@ -174,7 +207,9 @@ int main(void)
         // Once any of these 2 conditions is met, fall can be detected
         if (current_state == 2)
         {
-            if ((accel_mps2_magnitude - prev_accel_mps2_magnitude) >= (5.0f * prev_accel_mps2_magnitude) || (gyro_dps_magnitude - prev_gyro_dps_magnitude) >= 10.0f)
+            if (((accel_mps2_magnitude - prev_accel_mps2_magnitude) >= (5.0f * prev_accel_mps2_magnitude) &&
+                 accel_mps2_magnitude >= 25.0f) ||
+                (gyro_dps_magnitude - prev_gyro_dps_magnitude) >= 10.0f)
             {
                 fall_detected = 1;
             }
@@ -201,37 +236,15 @@ int main(void)
         }
         else
         {
-            recovery_period = 20;
+            recovery_period = (recovery_period > 18) ? 20 : recovery_period + 1;
         }
 
         prev_gyro_dps_magnitude = gyro_dps_magnitude;
         prev_accel_mps2_magnitude = accel_mps2_magnitude;
         prev_state = current_state;
 
-        /* Optional debugging check. This confirms that the assembly routine
-         * matches the reference C routine for the current samples. */
-        // if ((accel_ewma_asm[0] != accel_ewma_c[0]) ||
-        //     (accel_ewma_asm[1] != accel_ewma_c[1]) ||
-        //     (accel_ewma_asm[2] != accel_ewma_c[2]) ||
-        //     (gyro_ewma_asm[0] != gyro_ewma_c[0]) ||
-        //     (gyro_ewma_asm[1] != gyro_ewma_c[1]) ||
-        //     (gyro_ewma_asm[2] != gyro_ewma_c[2]))
-        // {
-        //     UART_Send("WARNING: Assembly and C EWMA outputs do not match.\r\n");
-        // }
-
-        /**************** Elderly wearable state logic starts here************************
-         * Compulsory requirements:
-         * 1. Use filtered accelerometer AND gyroscope readings.
-         * 2. Distinguish normal activity, near-fall movements, and a real fall.
-         * 3. Use a slow LED blink for normal operation and a fast blink after
-         *    a fall is detected.
-         *********************************************************************/
-
-        /* TODO: replace with your fall-detection logic */
-
         // BSP_LED_Toggle(LED2);
-        // HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
+        HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
         end = DWT->CYCCNT;
         cycles = end - start;
         float time_us = (float)cycles / (SystemCoreClock / 1000000);
