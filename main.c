@@ -21,7 +21,8 @@
 #define EWMA_ALPHA_ACCEL_PERCENT 80
 #define EWMA_ALPHA_GYRO_PERCENT 15
 #define FALL_LED_DELAY_MS 150
-#define FREEFALL_STREAK_MIN 3 // Tweak to adjust minimum drop duration
+#define FREEFALL_STREAK_MIN 3
+#define NORMAL_BLINK_MS 1400
 #define NORMAL_LED_DELAY_MS 1
 
 static void UART1_Init(void);
@@ -72,6 +73,7 @@ int main(void)
     int prev_state = 0;
     int current_state = 0; // 0: "normal" state, 1: "released" state, 2: "free-fall" state
     static int freefall_streak = 0;
+    static uint32_t last_toggle_ms = 0;
 
     float angular_displacement[3] = {0.0f, 0.0f, 0.0f};
 
@@ -243,7 +245,11 @@ int main(void)
         prev_accel_mps2_magnitude = accel_mps2_magnitude;
         prev_state = current_state;
 
-        // BSP_LED_Toggle(LED2);
+        if (fall_detected || (HAL_GetTick() - last_toggle_ms >= (fall_detected ? FALL_LED_DELAY_MS : NORMAL_BLINK_MS)))
+        {
+            BSP_LED_Toggle(LED2);
+            last_toggle_ms = HAL_GetTick();
+        }
         HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
         end = DWT->CYCCNT;
         cycles = end - start;
