@@ -21,7 +21,7 @@
 #define EWMA_ALPHA_ACCEL_PERCENT 80
 #define EWMA_ALPHA_GYRO_PERCENT 15
 #define FALL_LED_DELAY_MS 150
-#define FREEFALL_STREAK_MIN 3
+#define FREEFALL_STREAK_MIN 3 // Tweak to adjust minimum drop duration
 #define NORMAL_LED_DELAY_MS 1
 
 static void UART1_Init(void);
