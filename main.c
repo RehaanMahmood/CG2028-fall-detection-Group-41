@@ -143,11 +143,14 @@ int main(void)
                  "Accel EWMA ASM [m/s^2]: X=%8.3f Y=%8.3f Z=%8.3f\r\n"
                  "Gyro  EWMA ASM [dps]  : X=%8.3f Y=%8.3f Z=%8.3f\r\n"
                  "current_accel_magnitude : %8.3f\r\n"
-                 "current_distance_travelled : %8.3f\r\n"
+                 // "current_distance_travelled : %8.3f\r\n"
                  "current_gyro_magnitude : %8.3f\r\n",
                  sample_number,
                  accel_mps2[0], accel_mps2[1], accel_mps2[2],
-                 gyro_dps[0], gyro_dps[1], gyro_dps[2], accel_mps2_magnitude, current_distance_travelled, gyro_dps_magnitude);
+                 gyro_dps[0], gyro_dps[1], gyro_dps[2],
+                 accel_mps2_magnitude,
+                 // current_distance_travelled,
+                 gyro_dps_magnitude);
         UART_Send(buffer);
 
         /* Optional debugging check. This confirms that the assembly routine
@@ -217,14 +220,6 @@ int main(void)
             }
         }
 
-        if (fall_detected == 1)
-        {
-            char buffer0[320];
-            snprintf(buffer0, sizeof(buffer0), "FALL DETECTED!!!!!!!!\n");
-            UART_Send(buffer0);
-            current_state = 0;
-        }
-
         // prev_accel_mps2 = accel_mps2;
         // prev_gyro_dps = gyro_dps;
 
@@ -255,9 +250,17 @@ int main(void)
         cycles = end - start;
         float time_us = (float)cycles / (SystemCoreClock / 1000000);
 
-        /*char buffer1[320];
-        snprintf(buffer1, sizeof(buffer1), "Time taken : %8.3f\n", time_us);
-        UART_Send(buffer1);*/
+        char buffer1[320];
+        snprintf(buffer1, sizeof(buffer1), "Time taken : %8.3f\r\n\n", time_us);
+        UART_Send(buffer1);
+
+        if (fall_detected == 1)
+        {
+            char buffer0[320];
+            snprintf(buffer0, sizeof(buffer0), "FALL DETECTED!!!!!!!!\r\n\n");
+            UART_Send(buffer0);
+            current_state = 0;
+        }
 
         sample_number++;
     }
