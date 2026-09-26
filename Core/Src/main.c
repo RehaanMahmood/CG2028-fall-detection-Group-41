@@ -26,6 +26,9 @@
 #define LONG_PRESS_MS 1500
 #define NORMAL_BLINK_MS 1400
 // #define NORMAL_LED_DELAY_MS 1
+#define INACTIVITY_TIMEOUT_MS 15000    /* 60s for demo purposes */
+#define ACTIVITY_ACCEL_DELTA_MPS2 0.3f /* movement noise floor - tune empirically */
+#define ACTIVITY_GYRO_DELTA_DPS 3.0f
 
 static void UART1_Init(void);
 static void UART_Send(const char *text);
@@ -81,11 +84,15 @@ int main(void)
     static int button_was_down = 0;
     int is_wearing = 1;
     int is_sleeping = 0; // To be used when implementing alert for prolonged inactivity after fall
+    static uint32_t last_activity_ms = 0;
+    int low_urgency_alert = 0;
+    int emergency_alert = 0;
 
     float angular_displacement[3] = {0.0f, 0.0f, 0.0f};
 
     DWT_Init();
 
+    last_activity_ms = HAL_GetTick();
     while (1)
     {
         start = DWT->CYCCNT;
@@ -241,6 +248,7 @@ int main(void)
             if (recovery_period <= 0)
             {
                 fall_detected = 0;
+                emergency_alert = 0;
             }
         }
         else
@@ -255,6 +263,7 @@ int main(void)
         }
         if (!button_pressed && button_was_down) /* just released -> decide short vs long */
         {
+            last_activity_ms = HAL_GetTick(); /* user is clearly responsive */
             uint32_t held_ms = HAL_GetTick() - press_start_ms;
             if (held_ms >= LONG_PRESS_MS)
             {
@@ -264,7 +273,8 @@ int main(void)
             {
                 if (fall_detected)
                 {
-                    fall_detected ^= 1;
+                    fall_detected = 0;
+                    emergency_alert = 0;
                     char buffer0[320];
                     snprintf(buffer0, sizeof(buffer0), "RECOVERED.\r\n\n");
                     UART_Send(buffer0);
@@ -276,6 +286,51 @@ int main(void)
             }
         }
         button_was_down = button_pressed;
+
+        float accel_delta = fabsf(accel_mps2_magnitude - prev_accel_mps2_magnitude);
+        float gyro_delta = fabsf(gyro_dps_magnitude - prev_gyro_dps_magnitude);
+
+        if (sample_number >= 1 &&
+            (accel_delta >= ACTIVITY_ACCEL_DELTA_MPS2 || gyro_delta >= ACTIVITY_GYRO_DELTA_DPS))
+        {
+            last_activity_ms = HAL_GetTick();
+        }
+
+        uint32_t inactive_ms = HAL_GetTick() - last_activity_ms;
+
+        if (inactive_ms >= INACTIVITY_TIMEOUT_MS)
+        {
+            if (fall_detected)
+            {
+                emergency_alert = 1;
+                char buffer2[320];
+                snprintf(buffer2, sizeof(buffer2), "EMERGENCY: No response after fall. Calling emergency services...\r\n\n");
+                UART_Send(buffer2);
+            }
+            else if (is_wearing && !is_sleeping)
+            {
+                low_urgency_alert = 1;
+                char buffer3[320];
+                snprintf(buffer3, sizeof(buffer3), "ALERT: No movement detected for 60s.\r\n\n");
+                UART_Send(buffer3);
+            }
+        }
+        else
+        {
+            if (emergency_alert)
+            {
+                char buffer2[320];
+                snprintf(buffer2, sizeof(buffer2), "EMERGENCY: No response after fall. Calling emergency services...\r\n\n");
+                UART_Send(buffer2);
+            }
+            low_urgency_alert = 0;
+        }
+
+        char buffer4[160];
+        snprintf(buffer4, sizeof(buffer4),
+                 "inactive_ms=%lu  accel_delta=%.3f  gyro_delta=%.3f  low=%d  emerg=%d\r\n\n",
+                 inactive_ms, accel_delta, gyro_delta, low_urgency_alert, emergency_alert);
+        UART_Send(buffer4);
 
         prev_gyro_dps_magnitude = gyro_dps_magnitude;
         prev_accel_mps2_magnitude = accel_mps2_magnitude;
