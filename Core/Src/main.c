@@ -23,12 +23,13 @@
 #define EWMA_ALPHA_GYRO_PERCENT 15
 #define FALL_LED_DELAY_MS 150
 #define FREEFALL_STREAK_MIN 2
-#define LONG_PRESS_MS 1500
+#define LONG_PRESS_MS 1000
 #define NORMAL_BLINK_MS 1400
 // #define NORMAL_LED_DELAY_MS 1
-#define INACTIVITY_TIMEOUT_MS 15000    /* 60s for demo purposes */
-#define ACTIVITY_ACCEL_DELTA_MPS2 0.3f /* movement noise floor - tune empirically */
+#define INACTIVITY_TIMEOUT_MS 15000    // 60s for demo purposes
+#define ACTIVITY_ACCEL_DELTA_MPS2 0.3f // movement noise floor - tune empirically
 #define ACTIVITY_GYRO_DELTA_DPS 3.0f
+#define BUTTON_DEBOUNCE_MS 50
 
 static void UART1_Init(void);
 static void UART_Send(const char *text);
@@ -87,6 +88,7 @@ int main(void)
     static uint32_t last_activity_ms = 0;
     int low_urgency_alert = 0;
     int emergency_alert = 0;
+    static uint32_t last_button_edge_ms = 0;
 
     float angular_displacement[3] = {0.0f, 0.0f, 0.0f};
 
@@ -257,35 +259,42 @@ int main(void)
         }
 
         uint32_t button_pressed = (BSP_PB_GetState(BUTTON_USER) == GPIO_PIN_RESET);
-        if (button_pressed && !button_was_down)
+
+        if (button_pressed != button_was_down &&
+            (HAL_GetTick() - last_button_edge_ms) >= BUTTON_DEBOUNCE_MS)
         {
-            press_start_ms = HAL_GetTick();
-        }
-        if (!button_pressed && button_was_down) /* just released -> decide short vs long */
-        {
-            last_activity_ms = HAL_GetTick(); /* user is clearly responsive */
-            uint32_t held_ms = HAL_GetTick() - press_start_ms;
-            if (held_ms >= LONG_PRESS_MS)
+            last_button_edge_ms = HAL_GetTick();
+
+            if (button_pressed && !button_was_down)
             {
-                is_sleeping ^= 1;
+                press_start_ms = HAL_GetTick();
             }
-            else
+            if (!button_pressed && button_was_down) /* just released -> decide short vs long */
             {
-                if (fall_detected)
+                last_activity_ms = HAL_GetTick(); /* user is clearly responsive */
+                uint32_t held_ms = HAL_GetTick() - press_start_ms;
+                if (held_ms >= LONG_PRESS_MS)
                 {
-                    fall_detected = 0;
-                    emergency_alert = 0;
-                    char buffer0[320];
-                    snprintf(buffer0, sizeof(buffer0), "RECOVERED.\r\n\n");
-                    UART_Send(buffer0);
+                    is_sleeping ^= 1;
                 }
                 else
                 {
-                    is_wearing ^= 1;
+                    if (fall_detected)
+                    {
+                        fall_detected = 0;
+                        emergency_alert = 0;
+                        char buffer0[320];
+                        snprintf(buffer0, sizeof(buffer0), "RECOVERED.\r\n\n");
+                        UART_Send(buffer0);
+                    }
+                    else
+                    {
+                        is_wearing ^= 1;
+                    }
                 }
             }
+            button_was_down = button_pressed;
         }
-        button_was_down = button_pressed;
 
         float accel_delta = fabsf(accel_mps2_magnitude - prev_accel_mps2_magnitude);
         float gyro_delta = fabsf(gyro_dps_magnitude - prev_gyro_dps_magnitude);
