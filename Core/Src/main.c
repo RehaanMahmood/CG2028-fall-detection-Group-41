@@ -11,6 +11,7 @@
 #include <math.h>
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_accelero.h"
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_gyro.h"
+#include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01.h"
 #include "../../Drivers/BSP/Components/lsm6dsl/lsm6dsl.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -21,9 +22,10 @@
 #define EWMA_ALPHA_ACCEL_PERCENT 80
 #define EWMA_ALPHA_GYRO_PERCENT 15
 #define FALL_LED_DELAY_MS 150
-#define FREEFALL_STREAK_MIN 3
+#define FREEFALL_STREAK_MIN 2
+#define LONG_PRESS_MS 1500
 #define NORMAL_BLINK_MS 1400
-#define NORMAL_LED_DELAY_MS 1
+// #define NORMAL_LED_DELAY_MS 1
 
 static void UART1_Init(void);
 static void UART_Send(const char *text);
@@ -51,6 +53,7 @@ int main(void)
     BSP_ACCELERO_Init();
     BSP_GYRO_Init();
     BSP_LED_Off(LED2);
+    BSP_PB_Init(BUTTON_USER, BUTTON_MODE_GPIO);
 
     /* Previous EWMA outputs. The first test/application sample starts from 0. */
     int accel_ewma_asm[3] = {0, 0, 0};
@@ -66,7 +69,7 @@ int main(void)
     unsigned long sample_number = 0;
     float current_distance_travelled = 0;
     int fall_detected = 0;
-    int recovery_period = 20;
+    int recovery_period = 80;
     int fall_period = 5;
     float prev_gyro_dps_magnitude = 0;
     float prev_accel_mps2_magnitude = 0;
@@ -74,6 +77,10 @@ int main(void)
     int current_state = 0; // 0: "normal" state, 1: "released" state, 2: "free-fall" state
     static int freefall_streak = 0;
     static uint32_t last_toggle_ms = 0;
+    static uint32_t press_start_ms = 0;
+    static int button_was_down = 0;
+    int is_wearing = 1;
+    int is_sleeping = 0; // To be used when implementing alert for prolonged inactivity after fall
 
     float angular_displacement[3] = {0.0f, 0.0f, 0.0f};
 
@@ -144,13 +151,17 @@ int main(void)
                  "Gyro  EWMA ASM [dps]  : X=%8.3f Y=%8.3f Z=%8.3f\r\n"
                  "current_accel_magnitude : %8.3f\r\n"
                  // "current_distance_travelled : %8.3f\r\n"
-                 "current_gyro_magnitude : %8.3f\r\n",
+                 "current_gyro_magnitude : %8.3f\r\n"
+                 "Currently wearing device? : %d\r\n"
+                 "User sleeping? : %d\r\n",
                  sample_number,
                  accel_mps2[0], accel_mps2[1], accel_mps2[2],
                  gyro_dps[0], gyro_dps[1], gyro_dps[2],
                  accel_mps2_magnitude,
                  // current_distance_travelled,
-                 gyro_dps_magnitude);
+                 gyro_dps_magnitude,
+                 is_wearing,
+                 is_sleeping);
         UART_Send(buffer);
 
         /* Optional debugging check. This confirms that the assembly routine
@@ -176,9 +187,10 @@ int main(void)
         // this logic checks for decreases in acceleration (to detect if the board has been released)
 
         if ((sample_number >= 1) &&
-            (accel_mps2_magnitude <= 9.8f) &&                          // |accel| <= g
-            (current_state != 2) &&                                    // not free-falling
-            (accel_mps2_magnitude <= 0.5 * prev_accel_mps2_magnitude)) // accel is less than half of prev_accel
+            (accel_mps2_magnitude <= 9.8f) &&                            // |accel| <= g
+            (current_state != 2) &&                                      // not free-falling
+            (accel_mps2_magnitude <= 0.5 * prev_accel_mps2_magnitude) && // accel is less than half of prev_accel
+            (is_wearing))
         {
             /*angular_displacement[0] += gyro_dps[0] * 0.045f;
             angular_displacement[1] += gyro_dps[1] * 0.045f;
@@ -233,8 +245,37 @@ int main(void)
         }
         else
         {
-            recovery_period = (recovery_period > 18) ? 20 : recovery_period + 1;
+            recovery_period = (recovery_period > 78) ? 80 : recovery_period + 1;
         }
+
+        uint32_t button_pressed = (BSP_PB_GetState(BUTTON_USER) == GPIO_PIN_RESET);
+        if (button_pressed && !button_was_down)
+        {
+            press_start_ms = HAL_GetTick();
+        }
+        if (!button_pressed && button_was_down) /* just released -> decide short vs long */
+        {
+            uint32_t held_ms = HAL_GetTick() - press_start_ms;
+            if (held_ms >= LONG_PRESS_MS)
+            {
+                is_sleeping ^= 1;
+            }
+            else
+            {
+                if (fall_detected)
+                {
+                    fall_detected ^= 1;
+                    char buffer0[320];
+                    snprintf(buffer0, sizeof(buffer0), "RECOVERED.\r\n\n");
+                    UART_Send(buffer0);
+                }
+                else
+                {
+                    is_wearing ^= 1;
+                }
+            }
+        }
+        button_was_down = button_pressed;
 
         prev_gyro_dps_magnitude = gyro_dps_magnitude;
         prev_accel_mps2_magnitude = accel_mps2_magnitude;
@@ -245,7 +286,7 @@ int main(void)
             BSP_LED_Toggle(LED2);
             last_toggle_ms = HAL_GetTick();
         }
-        HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
+        // HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
         end = DWT->CYCCNT;
         cycles = end - start;
         float time_us = (float)cycles / (SystemCoreClock / 1000000);
