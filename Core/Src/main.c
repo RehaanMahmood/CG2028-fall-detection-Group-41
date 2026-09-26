@@ -26,7 +26,7 @@
 #define LONG_PRESS_MS 1000
 #define NORMAL_BLINK_MS 1400
 // #define NORMAL_LED_DELAY_MS 1
-#define INACTIVITY_TIMEOUT_MS 15000    // 60s for demo purposes
+#define INACTIVITY_TIMEOUT_MS 15000    // 15s for demo purposes
 #define ACTIVITY_ACCEL_DELTA_MPS2 0.3f // movement noise floor - tune empirically
 #define ACTIVITY_GYRO_DELTA_DPS 3.0f
 #define BUTTON_DEBOUNCE_MS 50
