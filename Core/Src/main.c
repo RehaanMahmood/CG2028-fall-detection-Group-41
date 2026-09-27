@@ -210,9 +210,10 @@ int main(void)
         }
         else
         {
-        	if (current_state != 1 && current_state != 2){
-        		current_state = 0; // it is normal
-        	}
+            if (current_state != 1 && current_state != 2)
+            {
+                current_state = 0; // it is normal
+            }
         }
 
         // if previously board was in the "released state", check if the vertical acceleration is high enough, and change it to the "free-fall" state
@@ -237,13 +238,15 @@ int main(void)
         // Once any of these 2 conditions is met, fall can be detected
         if (current_state == 2)
         {
-        	if (accel_mps2_magnitude >= 9.0f && accel_mps2_magnitude <= 10.0f && resonance_cycle_count <= 15){
-        		fall_detected = 1;
-        		current_state = 0;
-        	}
-        	else{
-        		resonance_cycle_count++;
-        	}
+            if (accel_mps2_magnitude >= 9.0f && accel_mps2_magnitude <= 10.0f && resonance_cycle_count <= 15)
+            {
+                fall_detected = 1;
+                current_state = 0;
+            }
+            else
+            {
+                resonance_cycle_count++;
+            }
         }
 
         // prev_accel_mps2 = accel_mps2;
