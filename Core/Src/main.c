@@ -22,7 +22,7 @@
 #define EWMA_ALPHA_ACCEL_PERCENT 80
 #define EWMA_ALPHA_GYRO_PERCENT 15
 #define FALL_LED_DELAY_MS 150
-#define FREEFALL_STREAK_MIN 2
+#define FREEFALL_STREAK_MIN 3
 #define LONG_PRESS_MS 1000
 #define NORMAL_BLINK_MS 1400
 // #define NORMAL_LED_DELAY_MS 1
@@ -89,6 +89,8 @@ int main(void)
     int low_urgency_alert = 0;
     int emergency_alert = 0;
     static uint32_t last_button_edge_ms = 0;
+    int resonance_cycle_count = 0;
+    int fallen_time = 0;
 
     float angular_displacement[3] = {0.0f, 0.0f, 0.0f};
 
@@ -208,7 +210,9 @@ int main(void)
         }
         else
         {
-            current_state = 0; // it is normal
+        	if (current_state != 1 && current_state != 2){
+        		current_state = 0; // it is normal
+        	}
         }
 
         // if previously board was in the "released state", check if the vertical acceleration is high enough, and change it to the "free-fall" state
@@ -224,7 +228,7 @@ int main(void)
             freefall_streak = 0;
         }
 
-        if (current_state == 0 && prev_state == 1 && freefall_streak >= FREEFALL_STREAK_MIN)
+        if (current_state == 1 && freefall_streak >= FREEFALL_STREAK_MIN)
         {
             current_state = 2;
         }
@@ -233,12 +237,13 @@ int main(void)
         // Once any of these 2 conditions is met, fall can be detected
         if (current_state == 2)
         {
-            if (((accel_mps2_magnitude - prev_accel_mps2_magnitude) >= (5.0f * prev_accel_mps2_magnitude) &&
-                 accel_mps2_magnitude >= 25.0f) ||
-                (gyro_dps_magnitude - prev_gyro_dps_magnitude) >= 10.0f)
-            {
-                fall_detected = 1;
-            }
+        	if (accel_mps2_magnitude >= 9.0f && accel_mps2_magnitude <= 10.0f && resonance_cycle_count <= 15){
+        		fall_detected = 1;
+        		current_state = 0;
+        	}
+        	else{
+        		resonance_cycle_count++;
+        	}
         }
 
         // prev_accel_mps2 = accel_mps2;
@@ -345,11 +350,11 @@ int main(void)
         prev_accel_mps2_magnitude = accel_mps2_magnitude;
         prev_state = current_state;
 
-        if (fall_detected || (HAL_GetTick() - last_toggle_ms >= (fall_detected ? FALL_LED_DELAY_MS : NORMAL_BLINK_MS)))
+        /*if (fall_detected || (HAL_GetTick() - last_toggle_ms >= (fall_detected ? FALL_LED_DELAY_MS : NORMAL_BLINK_MS)))
         {
             BSP_LED_Toggle(LED2);
             last_toggle_ms = HAL_GetTick();
-        }
+        }*/
         // HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
         end = DWT->CYCCNT;
         cycles = end - start;
