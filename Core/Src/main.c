@@ -275,7 +275,10 @@ int main(void)
                 uint32_t held_ms = HAL_GetTick() - press_start_ms;
                 if (held_ms >= LONG_PRESS_MS)
                 {
-                    is_sleeping ^= 1;
+                    if (is_wearing)
+                    {
+                        is_sleeping ^= 1;
+                    }
                 }
                 else
                 {
@@ -289,6 +292,10 @@ int main(void)
                     }
                     else
                     {
+                        if (is_wearing)
+                        {
+                            is_sleeping = 0;
+                        }
                         is_wearing ^= 1;
                     }
                 }
