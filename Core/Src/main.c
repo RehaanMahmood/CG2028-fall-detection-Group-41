@@ -360,11 +360,11 @@ int main(void)
         prev_accel_mps2_magnitude = accel_mps2_magnitude;
         prev_state = current_state;
 
-        /*if (fall_detected || (HAL_GetTick() - last_toggle_ms >= (fall_detected ? FALL_LED_DELAY_MS : NORMAL_BLINK_MS)))
+        if (fall_detected || (HAL_GetTick() - last_toggle_ms >= (fall_detected ? FALL_LED_DELAY_MS : NORMAL_BLINK_MS)))
         {
             BSP_LED_Toggle(LED2);
             last_toggle_ms = HAL_GetTick();
-        }*/
+        }
         // HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
         end = DWT->CYCCNT;
         cycles = end - start;
