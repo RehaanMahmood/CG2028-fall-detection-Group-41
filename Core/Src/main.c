@@ -13,6 +13,9 @@
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01_gyro.h"
 #include "../../Drivers/BSP/B-L4S5I-IOT01/stm32l4s5i_iot01.h"
 #include "../../Drivers/BSP/Components/lsm6dsl/lsm6dsl.h"
+#include "../../Drivers/BSP/Components/ssd1306/ssd1306.h"
+#include "../../Drivers/BSP/Components/ssd1306/ssd1306_fonts.h"
+#include "../../Drivers/STM32L4XX_HAL_Driver/Inc/stm32l4xx_hal_i2c.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -33,11 +36,13 @@
 
 static void UART1_Init(void);
 static void UART_Send(const char *text);
+static void I2C1_Init(void);
 
 extern int ewma_filter(int new_data, int old_output, int alpha_percent);
 // int ewma_filter_C(int new_data, int old_output, int alpha_percent);
 
 UART_HandleTypeDef huart1;
+I2C_HandleTypeDef hi2c1;
 
 uint32_t start, end, cycles;
 
@@ -48,10 +53,54 @@ void DWT_Init(void)
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 
+int fall_detected = 0;
+int is_wearing = 1;
+int is_sleeping = 0;
+int low_urgency_alert = 0;
+int emergency_alert = 0;
+
+typedef enum
+{
+    DISPLAY_NORMAL,
+    DISPLAY_SLEEPING,
+    DISPLAY_NOT_WORN,
+    DISPLAY_LOW_ALERT,
+    DISPLAY_FALL,
+    DISPLAY_EMERGENCY
+} display_state_t;
+
+display_state_t get_display_state(void)
+{
+    if (emergency_alert)
+        return DISPLAY_EMERGENCY;
+    if (fall_detected)
+        return DISPLAY_FALL;
+    if (!is_wearing)
+        return DISPLAY_NOT_WORN;
+    if (low_urgency_alert)
+        return DISPLAY_LOW_ALERT;
+    if (is_sleeping)
+        return DISPLAY_SLEEPING;
+    return DISPLAY_NORMAL;
+}
+
+static void draw_message(const char *line1, const char *line2)
+{
+    ssd1306_SetCursor(10, 20);
+    ssd1306_WriteString(line1, Font_7x10, White);
+    if (line2)
+    {
+        ssd1306_SetCursor(10, 40);
+        ssd1306_WriteString(line2, Font_7x10, White);
+    }
+}
+
 int main(void)
 {
     HAL_Init();
     UART1_Init();
+    I2C1_Init();
+    ssd1306_Init();
 
     BSP_LED_Init(LED2);
     BSP_ACCELERO_Init();
@@ -72,7 +121,7 @@ int main(void)
 
     unsigned long sample_number = 0;
     float current_distance_travelled = 0;
-    int fall_detected = 0;
+    // int fall_detected = 0;
     int recovery_period = 80;
     int fall_period = 5;
     float prev_gyro_dps_magnitude = 0;
@@ -83,11 +132,11 @@ int main(void)
     static uint32_t last_toggle_ms = 0;
     static uint32_t press_start_ms = 0;
     static int button_was_down = 0;
-    int is_wearing = 1;
-    int is_sleeping = 0; // To be used when implementing alert for prolonged inactivity after fall
+    // int is_wearing = 1;
+    // int is_sleeping = 0; // To be used when implementing alert for prolonged inactivity after fall
     static uint32_t last_activity_ms = 0;
-    int low_urgency_alert = 0;
-    int emergency_alert = 0;
+    // int low_urgency_alert = 0;
+    // int emergency_alert = 0;
     static uint32_t last_button_edge_ms = 0;
     int resonance_cycle_count = 0;
     int fallen_time = 0;
@@ -356,15 +405,45 @@ int main(void)
                  inactive_ms, accel_delta, gyro_delta, low_urgency_alert, emergency_alert);
         UART_Send(buffer4);
 
+        static display_state_t last_shown = -1;
+        display_state_t ds = get_display_state();
+        if (ds != last_shown)
+        {
+            ssd1306_Fill(Black);
+            switch (ds)
+            {
+            case DISPLAY_NORMAL:
+                draw_message(":)", NULL);
+                break;
+            case DISPLAY_SLEEPING:
+                draw_message("Z Z Z", NULL);
+                break;
+            case DISPLAY_NOT_WORN:
+                draw_message("NOT WORN", NULL);
+                break;
+            case DISPLAY_LOW_ALERT:
+                draw_message("! ALERT", "no movement");
+                break;
+            case DISPLAY_FALL:
+                draw_message("!! FALL", "detected");
+                break;
+            case DISPLAY_EMERGENCY:
+                draw_message("!!! SOS", "calling help");
+                break;
+            }
+            ssd1306_UpdateScreen();
+            last_shown = ds;
+        }
+
         prev_gyro_dps_magnitude = gyro_dps_magnitude;
         prev_accel_mps2_magnitude = accel_mps2_magnitude;
         prev_state = current_state;
 
-        /*if (fall_detected || (HAL_GetTick() - last_toggle_ms >= (fall_detected ? FALL_LED_DELAY_MS : NORMAL_BLINK_MS)))
+        if (fall_detected || (HAL_GetTick() - last_toggle_ms >= (fall_detected ? FALL_LED_DELAY_MS : NORMAL_BLINK_MS)))
         {
             BSP_LED_Toggle(LED2);
             last_toggle_ms = HAL_GetTick();
-        }*/
+        }
         // HAL_Delay(fall_detected ? FALL_LED_DELAY_MS : NORMAL_LED_DELAY_MS);
         end = DWT->CYCCNT;
         cycles = end - start;
@@ -428,6 +507,36 @@ static void UART1_Init(void)
         while (1)
         {
         }
+    }
+}
+
+static void I2C1_Init(void)
+{
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_I2C1_CLK_ENABLE();
+
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = ARD_D15_Pin | ARD_D14_Pin; /* PB8 (SCL), PB9 (SDA) */
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;          /* I2C needs open-drain */
+    GPIO_InitStruct.Pull = GPIO_PULLUP;              /* Grove board also has its own pull-ups; harmless either way */
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    hi2c1.Instance = I2C1;
+    hi2c1.Init.Timing = 0x00100D14; /* ~100kHz standard mode - see note below */
+    hi2c1.Init.OwnAddress1 = 0;
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.OwnAddress2 = 0;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+
+    if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+    {
+        while (1)
+        {
+        } /* matches your UART1_Init's error style */
     }
 }
 
