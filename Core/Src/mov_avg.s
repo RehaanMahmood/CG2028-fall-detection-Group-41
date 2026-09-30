@@ -15,7 +15,7 @@
 @ CG2028 Assignment
 @ (c) ECE NUS
 @ Write Student 1's Name here: Rehaan Mahmood (A0305908B)
-@ Write Student 2's Name here: Fahad Mohaideen Abdul Kader (A0000007X)
+@ Write Student 2's Name here: Fahad Mohaideen Abdul Kader (A0307449X)
 @
 @ Function prototype:
 @   int ewma_filter(int new_data, int old_output, int alpha_percent);
